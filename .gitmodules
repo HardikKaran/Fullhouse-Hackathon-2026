@@ -1,0 +1,3 @@
+[submodule "vendor/fullhouse-engine"]
+	path = vendor/fullhouse-engine
+	url = https://github.com/uzlez/fullhouse-engine
