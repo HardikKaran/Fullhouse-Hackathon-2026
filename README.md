@@ -79,3 +79,29 @@ and end a match early), so the harness always reads it from the result. Trust
 the **6-max table** row for ranking (it's the qualifier format); use the
 heads-up rows for diagnosis. Any hero error makes `gauntlet`/`duel` exit
 non-zero — a crashing bot must fail loudly, not quietly auto-fold.
+
+## Equity engine — verify & benchmark
+
+The Monte-Carlo equity engine is in `src/mybot/equity.py`: `mc_equity_vs_hand`
+(hero vs a known hand) and `mc_equity_vs_random` (hero vs N uniformly-random
+opponents), both returning `{equity, win, tie, loss, iters, ...}`. The exhaustive
+`equity_exact_headsup` is the offline oracle they are checked against.
+
+    source .venv/bin/activate
+    pytest tests/test_montecarlo.py -v      # unit tests vs published equities
+    python bench/equity_report.py           # verification table + latency table
+
+Expected: all preflop matchups PASS within ±1.0% (AKs vs QQ ~46%, AA vs KK ~82%,
+AA vs AKs ~88%, JJ vs AKs ~54%, AKo vs QQ ~43%, AA vs 72o ~88%). The report exits
+`0` only if every row passes. If a row **FAILS**, the sampler/deck/counting is
+wrong — do **not** widen the tolerance.
+
+Recommended ~50,000 iters/decision keeps `decide()` under the 2 s / 0.5 CPU
+tournament budget (see the latency table). `mc_equity_vs_random` also takes an
+optional `deadline` (a `time.monotonic()` timestamp) to hard-stop early and
+return the estimate so far.
+
+> ⚠️ `mc_equity_vs_random` assumes **uniformly-random** opponents, which
+> **overestimates** hero equity — real opponents fold trash, so a villain still
+> in the pot holds a stronger-than-random hand. Use it as a building block /
+> verification target; switch to a weighted range once the opponent model exists.
