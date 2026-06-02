@@ -36,6 +36,17 @@ REFERENCE_BOTS = {
     for name in ("template", "aggressor", "mathematician", "shark", "ref_bot_2")
 }
 
+# Local (non-vendored) test bots: a frozen copy of the shipped Tier-1 bot to use
+# as the paired-comparison baseline, and the Tier-3 balanced-TAG diagnostic
+# villain. Kept out of the vendored engine so the submodule stays clean.
+_LOCAL_BOTS_DIR = REPO_ROOT / "bots_local"
+LOCAL_BOTS = {
+    name: _LOCAL_BOTS_DIR / name / "bot.py"
+    for name in ("tier1_baseline", "balanced_tag")
+}
+TIER1_BASELINE = LOCAL_BOTS["tier1_baseline"]
+BALANCED_TAG = LOCAL_BOTS["balanced_tag"]
+
 
 def run_match_check():
     """Acceptance probe: prove the engine is importable from the submodule and

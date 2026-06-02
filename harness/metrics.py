@@ -38,3 +38,29 @@ def aggregate(samples: list) -> dict:
     se = stdev(samples) / math.sqrt(n)  # statistics.stdev is ddof=1
     half = 1.96 * se
     return {"mean": m, "se": se, "ci95_low": m - half, "ci95_high": m + half, "n": n}
+
+
+def delta_stats(deltas: list) -> dict:
+    """The qualifier's real ranking metric: **mean chip delta per match**.
+
+    `deltas` are the raw per-match `chip_delta["hero"]` values (final stack minus
+    the 10,000 starting stack), NOT bb/100. Unlike bb/100 this is exactly what the
+    qualifier ranks on, but it is heavy-tailed — a few stacked-opponent matches
+    dominate the mean — so its CI is wide; compare strategies over many matches.
+
+    Returns mean / se / ci95_low / ci95_high (95% normal CI on the mean),
+    `win_rate` = fraction of matches with a positive delta, and `n`.
+    """
+    n = len(deltas)
+    if n == 0:
+        return {"mean": 0.0, "se": 0.0, "ci95_low": 0.0, "ci95_high": 0.0,
+                "win_rate": 0.0, "n": 0}
+    m = mean(deltas)
+    win_rate = sum(1 for d in deltas if d > 0) / n
+    if n == 1:
+        return {"mean": m, "se": 0.0, "ci95_low": m, "ci95_high": m,
+                "win_rate": win_rate, "n": 1}
+    se = stdev(deltas) / math.sqrt(n)
+    half = 1.96 * se
+    return {"mean": m, "se": se, "ci95_low": m - half, "ci95_high": m + half,
+            "win_rate": win_rate, "n": n}

@@ -9,19 +9,22 @@ import argparse
 import sys
 
 from harness import paths
-from harness.metrics import aggregate, bb_per_100
+from harness.metrics import aggregate, bb_per_100, delta_stats
 
 
 def duel(hero_path, villain_path, matches=100, hands=400, base_seed=0, verbose=False):
-    """Run `matches` heads-up matches and aggregate the hero's bb/100.
+    """Run `matches` heads-up matches and aggregate the hero's results.
 
-    Returns the dict from metrics.aggregate(...) extended with match count,
-    total hands actually played, and per-side error counts.
+    Returns the dict from metrics.aggregate(...) (bb/100) extended with match
+    count, total hands actually played, per-side error counts, and a nested
+    `delta` dict (metrics.delta_stats over the raw per-match chip deltas — the
+    qualifier's real ranking metric).
     """
     hero_path = str(hero_path)
     villain_path = str(villain_path)
 
     samples = []
+    deltas = []
     total_hands = 0
     hero_errors = 0
     villain_errors = 0
@@ -40,6 +43,7 @@ def duel(hero_path, villain_path, matches=100, hands=400, base_seed=0, verbose=F
         n = result["n_hands"]
         delta = result["chip_delta"]["hero"]
         samples.append(bb_per_100(delta, n, paths.BIG_BLIND))
+        deltas.append(delta)
         total_hands += n
 
         h_errs = result["bot_errors"].get("hero") or []
@@ -55,6 +59,7 @@ def duel(hero_path, villain_path, matches=100, hands=400, base_seed=0, verbose=F
         total_hands=total_hands,
         hero_errors=hero_errors,
         villain_errors=villain_errors,
+        delta=delta_stats(deltas),
     )
     return stats
 
@@ -74,6 +79,13 @@ def main(argv=None):
     print(f"hero:    {args.hero}")
     print(f"villain: {args.villain}")
     print(f"matches={stats['matches']}  hands={stats['total_hands']}")
+    d = stats["delta"]
+    print(
+        f"avg Δ/match = {d['mean']:+.0f}   "
+        f"95% CI [{d['ci95_low']:+.0f}, {d['ci95_high']:+.0f}]   "
+        f"win-rate {d['win_rate']*100:.0f}%   "
+        f"(ranking metric)"
+    )
     print(
         f"bb/100 = {stats['mean']:+.2f}   "
         f"95% CI [{stats['ci95_low']:+.2f}, {stats['ci95_high']:+.2f}]"
