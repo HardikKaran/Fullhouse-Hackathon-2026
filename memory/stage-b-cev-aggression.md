@@ -24,8 +24,16 @@ Paired gates (6-max table, 240 fresh seeds, base 3000, workers 14;
 **+5,135** [+3093,+7178] — both CIs exclude 0. vs balanced-TAG (HU 200): **+38**
 [−417,+493], tied → not self-exploitable. 0 hero errors.
 
-**New baseline to beat = Stage-B (`bots_local/stageB/bot.py`).** L4 (haircut) was
-deferred (smallest leak). Next per plan: Stage C (wider late-position steals vs
-classified folders — leak L2), then D (cEV push/fold chart), then E (diverse villain
-pool). Supersedes the [[tier1-baseline-metric]] number as the gate target. Not yet
-git-committed.
+**Stage C** (flag `USE_STAGE_C`, frozen `bots_local/stageC/bot.py`) then fixed L2:
+added `pf_fold_freq` (clean preflop-fold signal) and a position-scaled, larger
+steal widen (cap 2.5 Chen pts vs 1.0), gated on every live opp being a classified
+folder. Gate (base 3000): vs Stage-B **+4,042** [+1968,+6116]; vs Tier-1 **+9,831**
+[+7447,+12215]; vs balanced-TAG **+789** [−290,+1869] tied. Open rate 15%→27%,
+win-rate 79%→84%, 0 errors. Committed on main.
+
+**Current best / gate target = Stage-C (`bots_local/stageC/bot.py`), ~+22.1k avg Δ
+on the ref table (base 3000), +9,831 paired vs Tier-1.** Flags USE_STAGE_B and
+USE_STAGE_C each revert independently. L4 (haircut) deferred (smallest leak).
+Remaining per plan: D (cEV push/fold chart — lowest value), E (diverse villain pool
+— generalization), F (package+validate dist/bot.zip). Supersedes
+[[tier1-baseline-metric]] as the gate target.
