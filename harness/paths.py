@@ -47,6 +47,14 @@ LOCAL_BOTS = {
 TIER1_BASELINE = LOCAL_BOTS["tier1_baseline"]
 BALANCED_TAG = LOCAL_BOTS["balanced_tag"]
 
+# Stage-E diverse villain pool: a richer out-of-sample proxy than the saturated
+# reference field (true LAG, big-bet calling station, pure tight nit). Each is a
+# self-contained, distinct-code bot — the honest generalisation check.
+DIVERSE_VILLAINS = {
+    name: _LOCAL_BOTS_DIR / name / "bot.py"
+    for name in ("true_lag", "calling_station", "tight_nit")
+}
+
 
 def run_match_check():
     """Acceptance probe: prove the engine is importable from the submodule and

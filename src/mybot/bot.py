@@ -75,6 +75,16 @@ USE_STAGE_B = True
 # scaled, larger widen, still gated on EVERY live opponent being a classified
 # folder (no station / maniac / unknown). False => Tier-2 steal magnitude.
 USE_STAGE_C = True
+# USE_STAGE_D: replace the crude short-stack Chen heuristic with a static,
+# position/stack-keyed chip-EV (NOT ICM) push/fold chart (PLAN §D / leak L5).
+# cEV ranges are WIDER than ICM (no payout ladder / survival premium here), and
+# the chart is widened further vs a classified-folder field and tightened vs
+# light callers. Separates open-shoves (first-in) from re-shoves (facing a raise).
+# GATED AND REVERTED: paired vs Stage-C the chart was a wash-to-slightly-negative
+# (ddelta -579 [-2819,+1661], A-better 44% — results/stageD_gate*.log), i.e. it did
+# NOT beat the simpler legacy heuristic on the lowest-value leak (L5). Kept behind
+# the flag (off) for the record / future refinement. False => legacy shove rule.
+USE_STAGE_D = False
 
 # --------------------------------------------------------------------------- #
 # Card primitives (inlined from mybot.hand_eval)
@@ -484,6 +494,50 @@ def _raise(target, min_raise_to, all_in_to):
 # --------------------------------------------------------------------------- #
 # Preflop policy
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Short-stack chip-EV push/fold chart (Stage D)
+# --------------------------------------------------------------------------- #
+# Open-shove Chen-score thresholds, keyed on effective stack (bb) and number of
+# live opponents to get through. cEV (not ICM) ranges — wider than ICM because
+# there is no payout ladder here. Rows are checked shallowest-first; columns are
+# n_opp = 1, 2, 3, 4, 5+. Calibrated to be WIDE (shallower / fewer opponents =>
+# jam more), with a model adjustment applied on top (_shove_adjust).
+_PF_SHOVE = (
+    (6,  (1.0, 3.0, 4.5, 6.0, 7.0)),
+    (9,  (3.0, 5.0, 6.5, 7.5, 8.5)),
+    (12, (4.5, 6.5, 8.0, 9.0, 9.5)),
+)
+
+
+def _pf_shove_th(eff_bb, n_opp):
+    """Base open-shove Chen threshold from the cEV chart."""
+    col = min(max(n_opp, 1), 5) - 1
+    for max_bb, row in _PF_SHOVE:
+        if eff_bb <= max_bb:
+            return row[col]
+    return _PF_SHOVE[-1][1][col]
+
+
+def _shove_adjust(state, model):
+    """Chen-point shift for the open-shove threshold from the opponent model.
+    Negative = jam wider. 0 if any live opponent is unknown (could be sticky).
+    Tighten vs light callers (station/maniac call our shove off); loosen vs a
+    field that folds preflop a lot (we pick up the blinds uncontested)."""
+    ids = _live_opp_ids(state)
+    if not ids:
+        return 0.0
+    fold = 1.0
+    for bid in ids:
+        p = _profile(model, bid)
+        a = p["archetype"]
+        if a == "unknown":
+            return 0.0
+        if a in ("station", "maniac"):
+            return 1.5  # they call light — need more equity to jam into them
+        fold = min(fold, p["pf_fold_freq"])
+    return -min(2.0, max(0.0, (fold - 0.45)) * 5.0)
+
+
 def _preflop(state, hole, model):
     chen = _chen(hole)
     n = len(state.get("players", [])) or 2
@@ -501,16 +555,43 @@ def _preflop(state, hole, model):
     all_in_to = my_stack + my_bet
     eff_bb = all_in_to / bb if bb else 100.0
 
+    raised = current_bet > bb  # someone has put in a real raise beyond the BB
+
     # --- Short-stack push/fold (effective <= ~12bb) -----------------------
     if eff_bb <= 12:
-        shove_th = 6.5 + 1.5 * (n_opp - 1) - 0.4 * max(0.0, 10.0 - eff_bb)
-        if chen >= shove_th:
-            return _raise(all_in_to, min_raise_to, all_in_to)  # jam
+        if not USE_STAGE_D:
+            shove_th = 6.5 + 1.5 * (n_opp - 1) - 0.4 * max(0.0, 10.0 - eff_bb)
+            if chen >= shove_th:
+                return _raise(all_in_to, min_raise_to, all_in_to)  # jam
+            if can_check:
+                return {"action": "check"}
+            return {"action": "fold"}
+        # Stage D: cEV push/fold chart. Pure shove-or-give-up (no limp at short
+        # stack — completing then folding to a raise just bleeds chips).
+        if not raised:
+            th = _pf_shove_th(eff_bb, n_opp)
+            if USE_RANGE_MODEL:
+                th += _shove_adjust(state, model)
+            if chen >= th:
+                return _raise(all_in_to, min_raise_to, all_in_to)  # open-jam
+            if can_check:
+                return {"action": "check"}
+            return {"action": "fold"}
+        # Facing a raise: re-shove range is set by the RAISER's range, which the
+        # model knows. A maniac (or unknown, often the table maniac early) raises
+        # near-random, so reshove WIDE for value (legacy did this and it was +cEV);
+        # a nit/shark raise is a real range, so reshove only premium.
+        reshove_th = 11.0
+        bettor = _last_aggressor_id(state, state["seat_to_act"])
+        if USE_RANGE_MODEL and bettor is not None:
+            ba = _profile(model, bettor)["archetype"]
+            reshove_th += {"maniac": -5.0, "station": -3.0,
+                           "unknown": -1.5, "nit": 1.0}.get(ba, 0.0)
+        if chen >= reshove_th:
+            return _raise(all_in_to, min_raise_to, all_in_to)  # value jam
         if can_check:
             return {"action": "check"}
         return {"action": "fold"}
-
-    raised = current_bet > bb  # someone has put in a real raise beyond the BB
 
     # --- Unopened (or limped) pot ----------------------------------------
     if not raised:
