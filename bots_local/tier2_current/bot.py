@@ -56,18 +56,6 @@ USE_RANGE_SAMPLING = False
 # Below this many logged decisions an opponent is treated as unknown (neutral
 # prior == Tier-1). Never swing hard off 3 hands (plan §3.1).
 MIN_SAMPLE = 16
-# USE_STAGE_B: Stage-B cEV posture corrections layered on the Tier-2 model
-# (PLAN_maximize_chip_delta §B + leak L1/L3):
-#   (a) MULTIWAY fold-equity stabs — generalise the heads-up-only semi-bluff so we
-#       collect fold equity against a folding field in multiway pots too. Gated by
-#       a multiway-aware fold equity `fe` = PRODUCT of per-opponent fold
-#       probabilities, so any station / maniac / unknown still in the pot drives
-#       `fe -> 0` and the stab never fires (self-protecting, not over-fit).
-#   (b) PASSIVE-FIELD value sizing — when every classified in-pot opponent is
-#       low-aggression (a pot-odds caller, not a raiser), cap value sizing at ~1/2
-#       pot and value thinner so we stop folding callers off our value bets.
-# False => exact current Tier-2 behaviour (one-flag revert).
-USE_STAGE_B = True
 
 # --------------------------------------------------------------------------- #
 # Card primitives (inlined from mybot.hand_eval)
@@ -604,22 +592,13 @@ def _postflop(state, hole, board, deadline, model):
         if eq_adj >= ex["value_th"]:  # made hand worth value
             return _raise(current_bet + round(pot * ex["value_size"]),
                           min_raise_to, all_in_to)
-        if USE_STAGE_B:
-            # Stage B (L1): multiway fold-equity stab. `ex["fe"]` is the PRODUCT of
-            # per-opponent fold probabilities, so this only fires when the whole
-            # live field is folders — _bluff_ok then guarantees the chips we win
-            # when they all fold beat the chips we risk when called. Works HU and
-            # multiway; stab_freq is 0 unless _exploits confirmed a folding field.
-            if ex["stab_lo"] <= eq_adj < ex["value_th"]:
-                cost = round(pot * ex["stab_size"])
-                if _bluff_ok(ex["fe"], pot, cost) and _RNG.random() < ex["stab_freq"]:
-                    return _raise(current_bet + cost, min_raise_to, all_in_to)
-        else:
-            # Legacy Tier-2 semi-bluff: heads-up only, fe-gated flat frequency.
-            if n_opp == 1 and ex["lo_sb"] <= eq_adj < ex["value_th"]:
-                cost = round(pot * 0.5)
-                if _bluff_ok(ex["fe"], pot, cost) and _RNG.random() < ex["sb_freq"]:
-                    return _raise(current_bet + cost, min_raise_to, all_in_to)
+        # Bounded semi-bluff: heads-up, live equity, and (Tier-2) positive fold
+        # equity. fe gate replaces the Tier-1 flat 33% so we bluff stations ~never
+        # and nits more (plan §3.3).
+        if n_opp == 1 and ex["lo_sb"] <= eq_adj < ex["value_th"]:
+            cost = round(pot * 0.5)
+            if _bluff_ok(ex["fe"], pot, cost) and _RNG.random() < ex["sb_freq"]:
+                return _raise(current_bet + cost, min_raise_to, all_in_to)
         return {"action": "check"}
 
     # --- Facing a bet: EV vs pot odds ------------------------------------
@@ -647,9 +626,6 @@ _NEUTRAL_EX = {
     "raise_th": 0.68, "call_cushion": 0.02,
     "lo_sb": 0.42, "sb_freq": 0.33, "fe": 1.0,
     "allow_sb_raise": True, "sb_raise_freq": 0.15,
-    # Stage-B multiway stab knobs. stab_freq == 0.0 in the neutral set, so when
-    # Stage B is off (or the field isn't a confirmed folder field) no stab fires.
-    "stab_lo": 0.20, "stab_size": 0.5, "stab_freq": 0.0,
 }
 
 
@@ -679,20 +655,6 @@ def _facing_hc_mult(state, model, hero_seat):
             "tag": 1.0, "unknown": 1.0}.get(arch, 1.0)
 
 
-def _pfold(p):
-    """Per-opponent probability of folding to a bet, from its archetype/stats.
-    Stations ~never fold; maniacs rarely; unknowns get a neutral prior; everyone
-    else uses their measured fold frequency (clamped)."""
-    a = p["archetype"]
-    if a == "unknown":
-        return 0.45
-    if a == "station":
-        return 0.05
-    if a == "maniac":
-        return 0.15
-    return max(0.0, min(0.9, p["fold_freq"]))
-
-
 def _exploits(state, model, live_ids, hero_seat):
     """Build the postflop exploit knobs from the model. Starts from the neutral
     (Tier-1) set and applies bounded, archetype-driven nudges."""
@@ -708,29 +670,20 @@ def _exploits(state, model, live_ids, hero_seat):
     station_field = any(a == "station" for a in archs)
     all_nit_or_tag = archs and all(a in ("nit", "tag") for a in archs)
 
-    # Fold-equity estimate for our bluffs. A stab only wins the pot if EVERY live
-    # opponent folds, so Stage B uses the PRODUCT of per-opponent fold
-    # probabilities — it scales down with the number of opponents and collapses to
-    # ~0 if any one of them is a station / maniac / unknown (self-protecting in
-    # multiway). Legacy Tier-2 used the MIN (overestimates multiway fold equity),
-    # which was fine when stabs were heads-up only.
-    profs = [_profile(model, b) for b in live_ids]
-    if USE_STAGE_B:
-        fe = 1.0
-        for p in profs:
-            fe *= _pfold(p)
-    else:
-        fe = 1.0
-        for p in profs:
-            fe = min(fe, _pfold(p))
+    # Fold-equity estimate for our bluffs: the live opponent LEAST likely to fold
+    # sets it. Stations ~never fold (fe→0); nits fold a lot (fe→high).
+    fe = 1.0
+    for b in live_ids:
+        p = _profile(model, b)
+        if p["archetype"] == "unknown":
+            fe = min(fe, 0.45)  # neutral prior
+        elif p["archetype"] == "station":
+            fe = min(fe, 0.05)
+        elif p["archetype"] == "maniac":
+            fe = min(fe, 0.15)
+        else:
+            fe = min(fe, max(0.0, min(0.9, p["fold_freq"])))
     ex["fe"] = fe
-
-    # Passive-caller field: every classified in-pot opponent is low-aggression (a
-    # pot-odds caller, not a raiser). unknown opponents don't count toward the
-    # all()-check (could be sticky). Drives Stage-B thin value sizing below.
-    known = [p for p in profs if p["archetype"] != "unknown"]
-    passive_field = bool(known) and all(
-        p["af"] <= 0.6 and p["allin_freq"] < 0.08 for p in known)
 
     # vs a loose/station field: value-bet THINNER, and size to their calling cap
     # (~half pot) so we don't fold them out (the reference callers fold to big
@@ -752,25 +705,6 @@ def _exploits(state, model, live_ids, hero_seat):
         ex["value_th"] = 0.58
         ex["sb_freq"] = 0.40
         ex["sb_raise_freq"] = 0.22
-
-    # --- Stage B knobs (L3 thin value + L1 multiway stab) ------------------
-    # L3: into a passive pot-odds-caller field, value-bet THINNER and sized to be
-    # CALLED (~1/2 pot). Applied after the nit/tag block so it overrides the
-    # too-tight 0.58 threshold — these callers are loose postflop even when they
-    # fold preflop, so thin payable value out-earns tightening up. Skipped if a
-    # loose/station field (already handled) or a maniac caller is in the pot.
-    if USE_STAGE_B and passive_field and not loose_field:
-        ex["value_th"] = min(ex["value_th"], 0.52)
-        ex["value_size"] = min(ex["value_size"], 0.5)
-        ex["overbet_size"] = min(ex["overbet_size"], 0.6)
-
-    # L1: turn on the multiway stab unless a loose caller is in the pot (then fold
-    # equity is gone). The _bluff_ok(fe, ...) gate in _postflop does the +EV math,
-    # so this is just an on/off frequency; fe (product) self-throttles by opponent
-    # count, and a station/maniac/unknown in the pot already pushes fe below the
-    # _bluff_ok threshold.
-    if USE_STAGE_B:
-        ex["stab_freq"] = 0.0 if loose_field else 0.55
 
     # vs a maniac BETTOR: trap. Call down lighter, don't bluff-raise, only
     # value-raise the near-nuts (let them keep barreling into us).

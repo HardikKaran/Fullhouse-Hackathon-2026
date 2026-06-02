@@ -128,8 +128,7 @@ def diagnose(hero_path, villain_paths, matches, n_hands, base_seed, iters):
             hero_start = stacks.get("hero", 0)
             hero_alive = "hero" in alive
             hero_pf_raised = False
-            hero_acted = False
-            hero_pf_voluntary = False  # hero put chips in preflop (call/raise)
+            hero_folded_pf = False  # hero folded preflop (out of the hand)
 
             state = _inject(engine.start_hand(), match_log)
             while state.get("type") == "action_request":
@@ -142,10 +141,8 @@ def diagnose(hero_path, villain_paths, matches, n_hands, base_seed, iters):
                     if engine.street == "preflop":
                         if act in ("raise", "all_in"):
                             hero_pf_raised = True
-                            hero_pf_voluntary = True
-                        elif act == "call":
-                            hero_pf_voluntary = True
-                    hero_acted = True
+                        elif act == "fold":
+                            hero_folded_pf = True
                 else:
                     action = villains[bid].decide(state)
                 match_log.append({
@@ -163,12 +160,12 @@ def diagnose(hero_path, villain_paths, matches, n_hands, base_seed, iters):
                 if hero_pf_raised:
                     T.delta_pf_raise += d
                     T.n_pf_raise += 1
-                elif hero_pf_voluntary:
-                    T.delta_pf_passive += d
-                    T.n_pf_passive += 1
-                else:
+                elif hero_folded_pf:
                     T.delta_pf_fold += d
                     T.n_pf_fold += 1
+                else:  # called, checked the BB option, or limped — saw a flop passively
+                    T.delta_pf_passive += d
+                    T.n_pf_passive += 1
 
         # end-of-match classification snapshot
         try:
