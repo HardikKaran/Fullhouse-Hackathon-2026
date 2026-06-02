@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from harness import paths
-from harness.metrics import aggregate, bb_per_100
+from harness.metrics import aggregate, bb_per_100, delta_stats
 
 
 def _unique_id(path, used):
@@ -42,6 +42,7 @@ def table(hero_path, villain_paths, matches=100, hands=400, base_seed=0, verbose
         villain_entries.append((vid, vp))
 
     samples = []
+    deltas = []
     total_hands = 0
     hero_errors = 0
 
@@ -56,6 +57,7 @@ def table(hero_path, villain_paths, matches=100, hands=400, base_seed=0, verbose
         n = result["n_hands"]
         delta = result["chip_delta"]["hero"]
         samples.append(bb_per_100(delta, n, paths.BIG_BLIND))
+        deltas.append(delta)
         total_hands += n
 
         h_errs = result["bot_errors"].get("hero") or []
@@ -69,6 +71,7 @@ def table(hero_path, villain_paths, matches=100, hands=400, base_seed=0, verbose
         total_hands=total_hands,
         hero_errors=hero_errors,
         seats=n_seats,
+        delta=delta_stats(deltas),
     )
     return stats
 
@@ -92,6 +95,13 @@ def main(argv=None):
 
     print(f"hero: {args.hero}")
     print(f"seats={stats['seats']}  matches={stats['matches']}  hands={stats['total_hands']}")
+    d = stats["delta"]
+    print(
+        f"avg Δ/match = {d['mean']:+.0f}   "
+        f"95% CI [{d['ci95_low']:+.0f}, {d['ci95_high']:+.0f}]   "
+        f"win-rate {d['win_rate']*100:.0f}%   "
+        f"(ranking metric)"
+    )
     print(
         f"bb/100 = {stats['mean']:+.2f}   "
         f"95% CI [{stats['ci95_low']:+.2f}, {stats['ci95_high']:+.2f}]"
