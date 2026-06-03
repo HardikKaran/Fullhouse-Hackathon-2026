@@ -31,9 +31,20 @@ folder. Gate (base 3000): vs Stage-B **+4,042** [+1968,+6116]; vs Tier-1 **+9,83
 [+7447,+12215]; vs balanced-TAG **+789** [−290,+1869] tied. Open rate 15%→27%,
 win-rate 79%→84%, 0 errors. Committed on main.
 
-**Current best / gate target = Stage-C (`bots_local/stageC/bot.py`), ~+22.1k avg Δ
-on the ref table (base 3000), +9,831 paired vs Tier-1.** Flags USE_STAGE_B and
-USE_STAGE_C each revert independently. L4 (haircut) deferred (smallest leak).
-Remaining per plan: D (cEV push/fold chart — lowest value), E (diverse villain pool
-— generalization), F (package+validate dist/bot.zip). Supersedes
-[[tier1-baseline-metric]] as the gate target.
+**Stage D** (cEV push/fold chart, flag `USE_STAGE_D`): attempted, gated, **REVERTED**
+(flag left False) — the chart never beat the simpler legacy short-stack heuristic
+(ΔΔ −579 vs Stage-C). Lowest-value leak L5. Code kept dormant.
+
+**Stage E** (diverse villain pool: true_lag / calling_station / tight_nit in
+`bots_local/`): generalization check. Exploits pay vs a real over-folder (tight_nit
+**+3,571** vs Tier-1), non-worse vs LAG/balanced-TAG. **Caught an over-fit**: the
+`station_field` logic was tuned for the reference *folders* (which fold to big bets)
+and under-extracted vs a *true* never-fold station (−900 vs Tier-1). Fix `USE_STAGE_E`:
+a sticky station (fold_freq<0.35) keeps NEUTRAL sizing (not shrunk, not overbet) →
+tied (−167) vs Tier-1, ref table unchanged.
+
+**Current best = Stage-E (`bots_local/stageE/bot.py`).** Flags: B=True, C=True,
+D=False, E=True (each reverts independently). Ref table ~+20k avg Δ (base 3000),
+~+9–10k paired vs Tier-1; non-worse across the diverse pool; 0 hero errors. Stages
+A–E committed on main. Remaining: F (package+validate dist/bot.zip + latency).
+Supersedes [[tier1-baseline-metric]] as the gate target.
